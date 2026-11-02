@@ -1,0 +1,51 @@
+# Copy to config.yaml and edit before running:
+#   cp config.example.yaml config.yaml
+#   go run ./cmd/relay -config config.yaml
+
+listen:
+  host: "0.0.0.0"
+  port: 5060
+  # Address put into Contact / SDP c= line (must be reachable by upper platforms)
+  publicHost: "192.168.1.100"
+
+zlm:
+  api: "http://127.0.0.1:80"
+  secret: "035c73f7-bb6b-4889-a715-d9eb2d1925cc"
+  vhost: "__defaultVhost__"
+  app: "gb28181"
+
+devices:
+  - deviceId: "34020000001320000001"
+    name: "relay-cam-1"
+    sip:
+      host: "192.168.1.10"          # upper platform SIP host
+      port: 5060
+      serverId: "34020000002000000001"
+      domain: "3402000000"
+      username: "34020000001320000001"  # digest user; defaults to deviceId
+      password: "12345678"
+      transport: "udp"              # udp | tcp
+      expires: 3600
+      keepalive: 60
+    channels:
+      - channelId: "34020000001320000001"
+        name: "ch1-flv"
+        flvUrl: "http://127.0.0.1:8080/live/cam1.live.flv"
+      - channelId: "34020000001320000002"
+        name: "ch2-flv"
+        flvUrl: "http://127.0.0.1:8080/live/cam2.live.flv"
+
+  # Example: second device registering to a different upper platform
+  # - deviceId: "34020000001320000011"
+  #   name: "relay-cam-2"
+  #   sip:
+  #     host: "10.0.0.20"
+  #     port: 5060
+  #     serverId: "34020000002000000011"
+  #     domain: "3402000000"
+  #     password: "another-secret"
+  #     transport: "tcp"
+  #   channels:
+  #     - channelId: "34020000001320000011"
+  #       name: "only-ch"
+  #       flvUrl: "http://127.0.0.1:8080/live/cam3.live.flv"
