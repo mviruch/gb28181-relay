@@ -11,7 +11,6 @@ import (
 
 	"github.com/emiago/sipgo"
 	"github.com/emiago/sipgo/sip"
-	"github.com/mickeyzzc/gb28181-go/manscdp"
 
 	"github.com/mviruch/gb28181-relay/internal/catalog"
 	"github.com/mviruch/gb28181-relay/internal/config"
@@ -239,7 +238,7 @@ func (d *DeviceUA) unregister(ctx context.Context) error {
 }
 
 func (d *DeviceUA) sendKeepalive(ctx context.Context) error {
-	body, err := manscdp.Encode(catalog.BuildKeepalive(d.cfg.DeviceID, d.nextSN()))
+	body, err := catalog.EncodeMANSCDP(catalog.BuildKeepalive(d.cfg.DeviceID, d.nextSN()))
 	if err != nil {
 		return err
 	}

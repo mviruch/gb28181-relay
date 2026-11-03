@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/mickeyzzc/gb28181-go/manscdp"
 	"github.com/mviruch/gb28181-relay/internal/config"
 )
 
@@ -111,10 +112,15 @@ func TestCatalogItemName_FromConfigAndFallback(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	joined := ""
+	var raw []byte
 	for _, b := range bodies {
-		joined += string(b)
+		raw = append(raw, b...)
 	}
+	utf8Body, err := manscdp.UTF8Body(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := string(utf8Body)
 	if !strings.Contains(joined, "<Name>前门枪机</Name>") {
 		t.Fatalf("configured channel name missing:\n%s", joined)
 	}

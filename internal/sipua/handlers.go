@@ -81,7 +81,7 @@ func (r *Runtime) onMessage(req *sip.Request, tx sip.ServerTransaction) {
 		return
 	case manscdp.CmdDeviceStatus:
 		respond(tx, req, 200, "OK", nil)
-		xmlBody, encErr := manscdp.Encode(catalog.BuildDeviceStatus(dev.cfg.DeviceID, sn))
+		xmlBody, encErr := catalog.EncodeMANSCDP(catalog.BuildDeviceStatus(dev.cfg.DeviceID, sn))
 		if encErr != nil {
 			r.log.Error("encode DeviceStatus", "err", encErr)
 			return

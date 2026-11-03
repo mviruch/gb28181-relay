@@ -134,7 +134,7 @@ func encodeCatalogPage(deviceID string, sn, sumNum int, items []catalogItem) ([]
 			Item: items,
 		},
 	}
-	return manscdp.Encode(resp)
+	return EncodeMANSCDP(resp)
 }
 
 func channelItems(dev config.DeviceConfig) []catalogItem {
@@ -233,7 +233,7 @@ func BuildDeviceInfoBody(dev config.DeviceConfig, sn int) ([]byte, error) {
 		Channel:      len(dev.Channels),
 		Result:       "OK",
 	}
-	return manscdp.Encode(resp)
+	return EncodeMANSCDP(resp)
 }
 
 // BuildDeviceStatus builds a minimal DeviceStatus response.
