@@ -45,7 +45,7 @@ type DeviceSIPConfig struct {
 	Transport  string `yaml:"transport"`  // udp | tcp
 	Expires    int    `yaml:"expires"`    // REGISTER expires seconds
 	Keepalive  int    `yaml:"keepalive"`  // Keepalive MESSAGE interval seconds
-	RegisterID string `yaml:"registerId"` // optional; empty => deviceId
+	RegisterID string `yaml:"registerId"` // deprecated/ignored; REGISTER Request-URI is always serverId@domain
 }
 
 type ChannelConfig struct {
@@ -109,12 +109,10 @@ func (c *Config) applyDefaults() {
 		if d.SIP.Username == "" {
 			d.SIP.Username = d.DeviceID
 		}
-		if d.SIP.RegisterID == "" {
-			d.SIP.RegisterID = d.DeviceID
-		}
 		if d.SIP.Domain == "" && len(d.SIP.ServerID) >= 10 {
 			d.SIP.Domain = d.SIP.ServerID[:10]
 		}
+		// registerId is ignored; sipua uses serverId@domain as REGISTER Request-URI.
 		if d.Name == "" {
 			d.Name = d.DeviceID
 		}

@@ -85,7 +85,17 @@ SIGINT / SIGTERM 会注销设备并清理会话。
 - `listen.publicHost`：写入 Contact / 应答 SDP `c=`，须上级可达
 - 出站 Via 带 `;rport`（NAT）；Contact/SDP 仍用 `listen.publicHost`
 - `devices[].sip`：上级 `host/port/serverId/domain`、密码、`transport: udp|tcp`
+- **REGISTER Request-URI** = `sip:{serverId}@{domain}`（LiveGBS / 常见国标上级）；**From/To** = `sip:{deviceId}@{domain}`。勿把设备 ID 放进 Request-URI，否则易被回 **400 Bad Request**
+- `registerId` 已忽略（保留字段仅为兼容旧 YAML）
 - `devices[].channels[]`：`channelId` + `flvUrl` + `name`
+
+## 联调注意（REGISTER 400）
+
+1. 确认上级登记的设备编码 / 域 / 平台编码与 `deviceId`、`domain`、`serverId` 一致；密码勿猜，以平台侧为准。
+2. 启动后日志会打完整出站报文（`REGISTER outbound`）。**Via / CSeq / Max-Forwards** 由 sipgo `ClientRequestBuild` 在发送前补齐；若你在代码里打印的是 build 前的 Request，会看起来像“缺 Via/CSeq”，那是截断观感，不是真缺。
+3. 不要用 sipgo 的 `ClientRequestRegisterBuild`：它按 RFC 3261 剥掉 Request-URI 的 userinfo，国标上级通常仍要 `serverId@domain`。
+4. 401/407 后走 Digest（`username` 默认 `deviceId`）；先 400 说明报文格式/URI 被拒，还没到鉴权。
+5. `publicHost` 须上级能回连（Contact）；仅改 URI 不够时再查网络/端口映射。
 
 ## manscdp 说明
 

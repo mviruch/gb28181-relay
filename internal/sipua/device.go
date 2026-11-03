@@ -26,6 +26,7 @@ type DeviceUA struct {
 	log        *slog.Logger
 
 	sn      atomic.Int64
+	regCSeq atomic.Uint32
 	regOK   atomic.Bool
 	callID  string
 	fromTag string
@@ -49,11 +50,28 @@ func (d *DeviceUA) nextSN() int {
 	return int(d.sn.Add(1))
 }
 
+func (d *DeviceUA) nextRegCSeq() uint32 {
+	return d.regCSeq.Add(1)
+}
+
+func (d *DeviceUA) syncRegCSeqFrom(req *sip.Request) {
+	if cseq := req.CSeq(); cseq != nil {
+		for {
+			cur := d.regCSeq.Load()
+			if cseq.SeqNo <= cur {
+				return
+			}
+			if d.regCSeq.CompareAndSwap(cur, cseq.SeqNo) {
+				return
+			}
+		}
+	}
+}
+
 func (d *DeviceUA) platformURI() sip.Uri {
 	return sip.Uri{
 		User: d.cfg.SIP.ServerID,
-		Host: d.cfg.SIP.Host,
-		Port: d.cfg.SIP.Port,
+		Host: d.cfg.SIP.Domain,
 	}
 }
 
@@ -63,6 +81,25 @@ func (d *DeviceUA) contactURI() sip.Uri {
 		Host: d.publicHost,
 		Port: d.listenPort,
 	}
+}
+
+func (d *DeviceUA) aorURI() sip.Uri {
+	return sip.Uri{
+		User: d.cfg.DeviceID,
+		Host: d.cfg.SIP.Domain,
+	}
+}
+
+// registerRecipient is the GB28181 / LiveGBS REGISTER Request-URI: sip:{serverId}@{domain}.
+// From/To stay deviceId@domain (AOR). Do NOT put deviceId in Request-URI — platforms
+// like LiveGBS answer 400 Bad Request. Also do NOT use sipgo.ClientRequestRegisterBuild:
+// it strips userinfo per RFC 3261, which GB upper platforms still expect.
+func (d *DeviceUA) registerRecipient() sip.Uri {
+	host := d.cfg.SIP.Domain
+	if host == "" {
+		host = d.cfg.SIP.Host
+	}
+	return sip.Uri{User: d.cfg.SIP.ServerID, Host: host}
 }
 
 func (d *DeviceUA) transport() string {
@@ -124,41 +161,53 @@ func (d *DeviceUA) RunRegisterLoop(ctx context.Context) {
 	}
 }
 
-func (d *DeviceUA) registerOnce(ctx context.Context) (expires int, err error) {
-	recipient := sip.Uri{
-		User: d.cfg.SIP.RegisterID,
-		Host: d.cfg.SIP.Domain,
-	}
-	if recipient.Host == "" {
-		recipient.Host = d.cfg.SIP.Host
-	}
+func (d *DeviceUA) buildRegisterRequest(expires int) *sip.Request {
+	recipient := d.registerRecipient()
 	req := sip.NewRequest(sip.REGISTER, recipient)
 	req.SetTransport(d.transport())
-	req.AppendHeader(sip.NewHeader("To", fmt.Sprintf("<sip:%s@%s>", d.cfg.DeviceID, d.cfg.SIP.Domain)))
-	req.AppendHeader(&sip.FromHeader{
-		Address: sip.Uri{User: d.cfg.DeviceID, Host: d.cfg.SIP.Domain},
-		Params:  headerParams("tag", d.fromTag),
-	})
-	req.AppendHeader(sip.NewHeader("Call-ID", d.callID))
-	contactParams := headerParams("expires", strconv.Itoa(d.cfg.SIP.Expires))
-	req.AppendHeader(&sip.ContactHeader{Address: d.contactURI(), Params: contactParams})
-	req.AppendHeader(sip.NewHeader("Expires", strconv.Itoa(d.cfg.SIP.Expires)))
-	req.SetDestination(fmt.Sprintf("%s:%d", d.cfg.SIP.Host, d.cfg.SIP.Port))
 
-	res, err := d.client.Do(ctx, req, sipgo.ClientRequestRegisterBuild)
+	aor := d.aorURI()
+	req.AppendHeader(&sip.ToHeader{Address: aor})
+	fromParams := sip.NewParams()
+	fromParams.Add("tag", d.fromTag)
+	req.AppendHeader(&sip.FromHeader{Address: aor, Params: fromParams})
+
+	cid := sip.CallIDHeader(d.callID)
+	req.AppendHeader(&cid)
+	req.AppendHeader(&sip.CSeqHeader{SeqNo: d.nextRegCSeq(), MethodName: sip.REGISTER})
+
+	contactParams := headerParams("expires", strconv.Itoa(expires))
+	req.AppendHeader(&sip.ContactHeader{Address: d.contactURI(), Params: contactParams})
+	req.AppendHeader(sip.NewHeader("Expires", strconv.Itoa(expires)))
+	req.SetDestination(fmt.Sprintf("%s:%d", d.cfg.SIP.Host, d.cfg.SIP.Port))
+	return req
+}
+
+func (d *DeviceUA) registerOnce(ctx context.Context) (expires int, err error) {
+	req := d.buildRegisterRequest(d.cfg.SIP.Expires)
+
+	// ClientRequestBuild fills Via/Max-Forwards/Content-Length but keeps Request-URI user
+	// (unlike ClientRequestRegisterBuild, which clears userinfo per RFC 3261).
+	res, err := d.client.Do(ctx, req, sipgo.ClientRequestBuild)
+	// req.String() AFTER Do includes Via/CSeq added by the build option (pre-build dumps look "missing" them).
+	d.log.Info("REGISTER outbound", "request", req.String())
 	if err != nil {
 		return 0, err
 	}
 	if res.StatusCode == sip.StatusUnauthorized || res.StatusCode == sip.StatusProxyAuthRequired {
+		d.log.Info("REGISTER challenge", "status", res.StatusCode, "response", res.String())
 		res, err = d.client.DoDigestAuth(ctx, req, res, sipgo.DigestAuth{
 			Username: d.cfg.SIP.Username,
 			Password: d.cfg.SIP.Password,
 		})
+		d.syncRegCSeqFrom(req)
+		d.log.Info("REGISTER auth outbound", "request", req.String())
 		if err != nil {
 			return 0, err
 		}
 	}
 	if res.StatusCode != 200 {
+		d.log.Warn("REGISTER rejected", "status", res.StatusCode, "reason", res.Reason, "response", res.String())
 		return 0, fmt.Errorf("REGISTER status %d", res.StatusCode)
 	}
 	exp := d.cfg.SIP.Expires
@@ -171,23 +220,10 @@ func (d *DeviceUA) registerOnce(ctx context.Context) (expires int, err error) {
 }
 
 func (d *DeviceUA) unregister(ctx context.Context) error {
-	recipient := sip.Uri{User: d.cfg.SIP.RegisterID, Host: d.cfg.SIP.Domain}
-	if recipient.Host == "" {
-		recipient.Host = d.cfg.SIP.Host
-	}
-	req := sip.NewRequest(sip.REGISTER, recipient)
-	req.SetTransport(d.transport())
-	req.AppendHeader(sip.NewHeader("To", fmt.Sprintf("<sip:%s@%s>", d.cfg.DeviceID, d.cfg.SIP.Domain)))
-	req.AppendHeader(&sip.FromHeader{
-		Address: sip.Uri{User: d.cfg.DeviceID, Host: d.cfg.SIP.Domain},
-		Params:  headerParams("tag", d.fromTag),
-	})
-	req.AppendHeader(sip.NewHeader("Call-ID", d.callID))
-	req.AppendHeader(&sip.ContactHeader{Address: d.contactURI(), Params: headerParams("expires", "0")})
-	req.AppendHeader(sip.NewHeader("Expires", "0"))
-	req.SetDestination(fmt.Sprintf("%s:%d", d.cfg.SIP.Host, d.cfg.SIP.Port))
+	req := d.buildRegisterRequest(0)
 
-	res, err := d.client.Do(ctx, req, sipgo.ClientRequestRegisterBuild)
+	res, err := d.client.Do(ctx, req, sipgo.ClientRequestBuild)
+	d.log.Info("UNREGISTER outbound", "request", req.String())
 	if err != nil {
 		return err
 	}
@@ -196,6 +232,7 @@ func (d *DeviceUA) unregister(ctx context.Context) error {
 			Username: d.cfg.SIP.Username,
 			Password: d.cfg.SIP.Password,
 		})
+		d.syncRegCSeqFrom(req)
 		return err
 	}
 	return nil
@@ -209,10 +246,12 @@ func (d *DeviceUA) sendKeepalive(ctx context.Context) error {
 	recipient := d.platformURI()
 	req := sip.NewRequest(sip.MESSAGE, recipient)
 	req.SetTransport(d.transport())
-	req.AppendHeader(sip.NewHeader("To", fmt.Sprintf("<sip:%s@%s>", d.cfg.SIP.ServerID, d.cfg.SIP.Domain)))
+	req.AppendHeader(&sip.ToHeader{Address: sip.Uri{User: d.cfg.SIP.ServerID, Host: d.cfg.SIP.Domain}})
+	fromParams := sip.NewParams()
+	fromParams.Add("tag", sip.GenerateTagN(8))
 	req.AppendHeader(&sip.FromHeader{
-		Address: sip.Uri{User: d.cfg.DeviceID, Host: d.cfg.SIP.Domain},
-		Params:  headerParams("tag", sip.GenerateTagN(8)),
+		Address: d.aorURI(),
+		Params:  fromParams,
 	})
 	req.AppendHeader(sip.NewHeader("Content-Type", "Application/MANSCDP+xml"))
 	req.SetBody(body)

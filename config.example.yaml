@@ -20,7 +20,7 @@ devices:
     sip:
       host: "192.168.1.10"          # upper platform SIP host
       port: 5060
-      serverId: "34020000002000000001"
+      serverId: "34020000002000000001"  # also REGISTER Request-URI user (sip:serverId@domain)
       domain: "3402000000"
       username: "34020000001320000001"  # digest user; defaults to deviceId
       password: "12345678"
