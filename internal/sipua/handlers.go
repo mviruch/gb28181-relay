@@ -51,14 +51,58 @@ func (r *Runtime) onMessage(req *sip.Request, tx sip.ServerTransaction) {
 		}
 	}
 
-	var xmlBody []byte
+	// GB/T 28181 + LiveGBS: answer the query MESSAGE with empty 200 OK, then
+	// push the MANSCDP Response as outbound Request MESSAGE(s). Putting a
+	// large Catalog XML in the 200 body hits sipgo's UDP MTU guard
+	// (ErrUDPMTUCongestion: "size of packet larger than MTU").
 	switch ct {
 	case manscdp.CmdCatalog:
-		xmlBody, err = manscdp.Encode(catalog.BuildResponse(dev.cfg, sn))
+		respond(tx, req, 200, "OK", nil)
+		bodies, encErr := catalog.BuildResponseBodies(dev.cfg, sn)
+		if encErr != nil {
+			r.log.Error("encode Catalog", "err", encErr)
+			return
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		for i, body := range bodies {
+			if err := dev.sendMANSCDP(ctx, body); err != nil {
+				r.log.Warn("Catalog MESSAGE failed", "err", err, "page", i+1, "pages", len(bodies), "bytes", len(body))
+				return
+			}
+			r.log.Info("Catalog MESSAGE sent", "deviceId", dev.cfg.DeviceID, "page", i+1, "pages", len(bodies), "bytes", len(body), "sn", sn)
+		}
+		return
 	case manscdp.CmdDeviceInfo:
-		xmlBody, err = manscdp.Encode(catalog.BuildDeviceInfo(dev.cfg, sn))
+		respond(tx, req, 200, "OK", nil)
+		xmlBody, encErr := manscdp.Encode(catalog.BuildDeviceInfo(dev.cfg, sn))
+		if encErr != nil {
+			r.log.Error("encode DeviceInfo", "err", encErr)
+			return
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := dev.sendMANSCDP(ctx, xmlBody); err != nil {
+			r.log.Warn("DeviceInfo MESSAGE failed", "err", err)
+			return
+		}
+		r.log.Info("DeviceInfo MESSAGE sent", "deviceId", dev.cfg.DeviceID, "bytes", len(xmlBody), "sn", sn)
+		return
 	case manscdp.CmdDeviceStatus:
-		xmlBody, err = manscdp.Encode(catalog.BuildDeviceStatus(dev.cfg.DeviceID, sn))
+		respond(tx, req, 200, "OK", nil)
+		xmlBody, encErr := manscdp.Encode(catalog.BuildDeviceStatus(dev.cfg.DeviceID, sn))
+		if encErr != nil {
+			r.log.Error("encode DeviceStatus", "err", encErr)
+			return
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := dev.sendMANSCDP(ctx, xmlBody); err != nil {
+			r.log.Warn("DeviceStatus MESSAGE failed", "err", err)
+			return
+		}
+		r.log.Info("DeviceStatus MESSAGE sent", "deviceId", dev.cfg.DeviceID, "bytes", len(xmlBody), "sn", sn)
+		return
 	case manscdp.CmdKeepalive:
 		respond(tx, req, 200, "OK", nil)
 		return
@@ -67,18 +111,6 @@ func (r *Runtime) onMessage(req *sip.Request, tx sip.ServerTransaction) {
 		respond(tx, req, 200, "OK", nil)
 		return
 	}
-	if err != nil {
-		r.log.Error("encode MANSCDP", "err", err)
-		respond(tx, req, 500, "Server Internal Error", nil)
-		return
-	}
-	res := sip.NewResponseFromRequest(req, 200, "OK", xmlBody)
-	res.AppendHeader(sip.NewHeader("Content-Type", "Application/MANSCDP+xml"))
-	if err := tx.Respond(res); err != nil {
-		r.log.Warn("MESSAGE 200 failed", "err", err)
-		return
-	}
-	r.log.Info("MESSAGE answered", "cmd", cmd, "deviceId", dev.cfg.DeviceID, "bytes", len(xmlBody))
 }
 
 func (r *Runtime) onInvite(req *sip.Request, tx sip.ServerTransaction) {

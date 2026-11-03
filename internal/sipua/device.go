@@ -243,6 +243,13 @@ func (d *DeviceUA) sendKeepalive(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	return d.sendMANSCDP(ctx, body)
+}
+
+// sendMANSCDP sends an outbound SIP MESSAGE with a MANSCDP XML body to the
+// upper platform. Used for Keepalive and for Catalog/DeviceInfo/DeviceStatus
+// responses (GB practice: empty 200 to the query, then Request MESSAGE).
+func (d *DeviceUA) sendMANSCDP(ctx context.Context, body []byte) error {
 	recipient := d.platformURI()
 	req := sip.NewRequest(sip.MESSAGE, recipient)
 	req.SetTransport(d.transport())
@@ -262,7 +269,7 @@ func (d *DeviceUA) sendKeepalive(ctx context.Context) error {
 		return err
 	}
 	if res.StatusCode >= 300 {
-		return fmt.Errorf("Keepalive status %d", res.StatusCode)
+		return fmt.Errorf("MESSAGE status %d", res.StatusCode)
 	}
 	return nil
 }

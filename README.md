@@ -8,7 +8,7 @@
 
 - 多设备 `REGISTER` + Digest
 - 心跳 `Keepalive`（MESSAGE Notify）
-- `Catalog` / `DeviceInfo` / `DeviceStatus` 查询应答（MANSCDP XML）
+- `Catalog` / `DeviceInfo` / `DeviceStatus`：查询 MESSAGE 先空 200，再主动 MESSAGE 上报；Catalog 按 UDP MTU 多包分页（同 SN / SumNum，DeviceList 分片）
 - 实时 `INVITE` 点播（Play）+ `BYE` 清理 ZLM 推流/代理
 - 每设备可指向不同上级；每设备多通道；通道 = `channelId` + `flvUrl`
 
@@ -97,6 +97,12 @@ SIGINT / SIGTERM 会注销设备并清理会话。
 4. 401/407 后走 Digest（`username` 默认 `deviceId`）；先 400 说明报文格式/URI 被拒，还没到鉴权。
 5. `publicHost` 须上级能回连（Contact）；仅改 URI 不够时再查网络/端口映射。
 
+## 联调注意（Catalog / MESSAGE MTU）
+
+sipgo UDP 发送上限约 **1300 字节**（`UDPMTUSize-200`）。把整份 Catalog XML 塞进查询的 **200 body** 会触发 `size of packet larger than MTU`。
+
+当前行为：查询 MESSAGE → **空 200 OK** → 设备侧再发 **Request MESSAGE** 上报 Response；通道多时按 body≤800B 分页，每页同 `SN`/`SumNum`，`DeviceList Num` 为本页条数。日志应见 `Catalog MESSAGE sent page=…`，不应再出现 `MESSAGE 200 failed`。
+
 ## manscdp 说明
 
 直接依赖 `github.com/mickeyzzc/gb28181-go/manscdp`（v0.15.1）。该子包自带 GB2312/GBK 声明处理与 Catalog/Keepalive 等类型；本仓库 **不 vendor、不复制** 其源码。
@@ -106,7 +112,6 @@ SIGINT / SIGTERM 会注销设备并清理会话。
 ## 已知缺口 / 下一步
 
 - 未做 TCP 监听与 UDP 同端口冲突时的精细分流；多 transport 时会对同一 `listen` 地址分别 `ListenAndServe`
-- Catalog 大目录分包（多 MESSAGE）未做
 - 未应答 `SUBSCRIBE`（Catalog 订阅 / 移动位置等）
 - INVITE 鉴权、SSRC 自生成策略、ZLM 拉流就绪等待（`getMediaList` 轮询）可加强
 - 无自动化联调测试（需真实/模拟上级 + ZLM）
