@@ -110,12 +110,14 @@ sipgo UDP 发送上限约 **1300 字节**（`UDPMTUSize-200`）。把整份 Cata
 
 ## 显示名称（Catalog / DeviceInfo）
 
-上级列表里的名称来自 YAML，写入 MANSCDP 时**不会留空**：
+两处 `name` **各归各位**，写入 MANSCDP 时**不会留空**：
 
-| 配置 | XML | 用途 |
-|------|-----|------|
-| `devices[].name` | DeviceInfo `<DeviceName>` + `<Name>` | 设备显示名；空则回退 `deviceId` |
-| `channels[].name` | Catalog Item `<Name>` | 通道/镜头显示名；空则回退 `channelId` |
+| 配置 | 写入 XML | 用途 |
+|------|----------|------|
+| `devices[].name` | DeviceInfo `<DeviceName>` + `<Name>` | **设备级**显示名；空则回退 `deviceId` |
+| `channels[].name` | Catalog 通道 Item `<Name>` | **通道/镜头**显示名；空则回退 `channelId` |
+
+**不要**把 Catalog Item `<Name>` 填成 `devices[].name`。LiveGBS 等平台的「设备列表」往往列的是 Catalog 通道条目，因此那里看到的是 `channels[].name`（如 `ch1-flv`）是预期行为；设备名 `devices[].name`（如 `relay-cam-1`）出现在 DeviceInfo。
 
 Load 时 `applyDefaults` 也会把空 name 填成 id；Catalog/DeviceInfo 组装再兜一层。
 

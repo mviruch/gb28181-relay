@@ -15,7 +15,7 @@ zlm:
   app: "gb28181"
 
 devices:
-  # devices[].name → DeviceInfo <DeviceName>/<Name>（上级设备显示名）；空则用 deviceId
+  # devices[].name → DeviceInfo <DeviceName>/<Name>（设备级显示名，如 relay-cam-1）；空则用 deviceId
   - deviceId: "34020000001320000001"
     name: "relay-cam-1"
     sip:
@@ -29,7 +29,7 @@ devices:
       expires: 3600
       keepalive: 60
     channels:
-      # channels[].name → Catalog Item <Name>（上级通道/镜头显示名）；空则用 channelId
+      # channels[].name → Catalog 通道 Item <Name>（通道显示名，如 ch1-flv；勿填设备名）；空则用 channelId
       - channelId: "34020000001320000001"
         name: "ch1-flv"
         flvUrl: "http://127.0.0.1:8080/live/cam1.live.flv"
