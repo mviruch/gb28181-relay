@@ -42,6 +42,18 @@ func TestBuildResponseBodies_SinglePage(t *testing.T) {
 	if !strings.Contains(s, "<CmdType>Catalog</CmdType>") {
 		t.Fatalf("missing CmdType: %s", s)
 	}
+	if !strings.Contains(s, "<SN>7</SN>") {
+		t.Fatalf("missing SN: %s", s)
+	}
+	for _, field := range []string{
+		"<Name>", "<Manufacturer>", "<Model>", "<Owner>",
+		"<CivilCode>", "<Address>", "<Parental>", "<ParentID>",
+		"<SafetyWay>", "<RegisterWay>", "<Status>", "<Secrecy>",
+	} {
+		if !strings.Contains(s, field) {
+			t.Fatalf("missing Item field %s: %s", field, s)
+		}
+	}
 }
 
 func TestBuildResponseBodies_PagedBySize(t *testing.T) {
@@ -82,5 +94,63 @@ func TestBuildResponseBodies_AllItemsCovered(t *testing.T) {
 	}
 	if total != n {
 		t.Fatalf("covered %d items want %d across %d pages", total, n, len(bodies))
+	}
+}
+
+func TestCatalogItemName_FromConfigAndFallback(t *testing.T) {
+	dev := config.DeviceConfig{
+		DeviceID: "34020000001320000001",
+		Name:     "relay-cam-1",
+		SIP:      config.DeviceSIPConfig{Domain: "3502000000"},
+		Channels: []config.ChannelConfig{
+			{ChannelID: "34020000001320000001", Name: "前门枪机"},
+			{ChannelID: "34020000001320000002", Name: ""}, // fallback → channelId
+		},
+	}
+	bodies, err := BuildResponseBodies(dev, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := ""
+	for _, b := range bodies {
+		joined += string(b)
+	}
+	if !strings.Contains(joined, "<Name>前门枪机</Name>") {
+		t.Fatalf("configured channel name missing:\n%s", joined)
+	}
+	if !strings.Contains(joined, "<Name>34020000001320000002</Name>") {
+		t.Fatalf("empty channel name should fall back to channelId:\n%s", joined)
+	}
+}
+
+func TestDeviceInfoBody_NameAndDeviceName(t *testing.T) {
+	dev := config.DeviceConfig{
+		DeviceID: "34020000001320000001",
+		Name:     "relay-cam-1",
+		Channels: []config.ChannelConfig{{ChannelID: "34020000001320000001", Name: "ch1"}},
+	}
+	body, err := BuildDeviceInfoBody(dev, 123)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(body)
+	if !strings.Contains(s, "<SN>123</SN>") {
+		t.Fatalf("SN: %s", s)
+	}
+	if !strings.Contains(s, "<DeviceName>relay-cam-1</DeviceName>") {
+		t.Fatalf("DeviceName: %s", s)
+	}
+	if !strings.Contains(s, "<Name>relay-cam-1</Name>") {
+		t.Fatalf("Name: %s", s)
+	}
+
+	empty := config.DeviceConfig{DeviceID: "34020000001320000099"}
+	body2, err := BuildDeviceInfoBody(empty, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s2 := string(body2)
+	if !strings.Contains(s2, "<DeviceName>34020000001320000099</DeviceName>") {
+		t.Fatalf("empty device name should fall back to deviceId: %s", s2)
 	}
 }

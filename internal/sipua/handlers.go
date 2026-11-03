@@ -21,35 +21,26 @@ func (r *Runtime) onMessage(req *sip.Request, tx sip.ServerTransaction) {
 	}
 
 	body := req.Body()
-	ct, msg, err := manscdp.Decode(body)
-	sn := 0
-	cmd := string(ct)
 
-	if err != nil {
-		// DeviceInfo/DeviceStatus queries are <Query> rooted; manscdp types expect <Response>.
-		probe, perr := catalog.ProbeMessage(body)
-		if perr != nil {
-			r.log.Warn("MANSCDP decode", "err", err, "probeErr", perr, "deviceId", dev.cfg.DeviceID)
-			respond(tx, req, 400, "Bad Request", nil)
-			return
-		}
-		cmd = probe.CmdType
-		sn = probe.SN
-		ct = manscdp.CmdType(cmd)
-	} else {
-		switch m := msg.(type) {
-		case *manscdp.CatalogQuery:
-			sn = m.SN
-		case *manscdp.Catalog:
-			sn = m.SN
-		case *manscdp.DeviceInfo:
-			sn = m.SN
-		case *manscdp.DeviceStatus:
-			sn = m.SN
-		case *manscdp.Keepalive:
-			sn = m.SN
-		}
+	// Always extract CmdType+SN via tolerant XML probe. manscdp.Decode returns
+	// value types (not *T), so a type-switch on *CatalogQuery silently misses
+	// and left SN=0 — LiveGBS then re-queries forever.
+	probe, perr := catalog.ProbeMessage(body)
+	if perr != nil {
+		r.log.Warn("MANSCDP probe failed", "err", perr, "deviceId", dev.cfg.DeviceID, "bodyLen", len(body))
+		respond(tx, req, 400, "Bad Request", nil)
+		return
 	}
+	cmd := probe.CmdType
+	sn := probe.SN
+	ct := manscdp.CmdType(cmd)
+	r.log.Info("inbound MESSAGE",
+		"deviceId", dev.cfg.DeviceID,
+		"cmd", cmd,
+		"sn", sn,
+		"bodyLen", len(body),
+		"root", probe.XMLName.Local,
+	)
 
 	// GB/T 28181 + LiveGBS: answer the query MESSAGE with empty 200 OK, then
 	// push the MANSCDP Response as outbound Request MESSAGE(s). Putting a
@@ -65,17 +56,17 @@ func (r *Runtime) onMessage(req *sip.Request, tx sip.ServerTransaction) {
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
-		for i, body := range bodies {
-			if err := dev.sendMANSCDP(ctx, body); err != nil {
-				r.log.Warn("Catalog MESSAGE failed", "err", err, "page", i+1, "pages", len(bodies), "bytes", len(body))
+		for i, page := range bodies {
+			if err := dev.sendMANSCDP(ctx, page); err != nil {
+				r.log.Warn("Catalog MESSAGE failed", "err", err, "page", i+1, "pages", len(bodies), "bytes", len(page))
 				return
 			}
-			r.log.Info("Catalog MESSAGE sent", "deviceId", dev.cfg.DeviceID, "page", i+1, "pages", len(bodies), "bytes", len(body), "sn", sn)
+			r.log.Info("Catalog MESSAGE sent", "deviceId", dev.cfg.DeviceID, "page", i+1, "pages", len(bodies), "bytes", len(page), "sn", sn)
 		}
 		return
 	case manscdp.CmdDeviceInfo:
 		respond(tx, req, 200, "OK", nil)
-		xmlBody, encErr := manscdp.Encode(catalog.BuildDeviceInfo(dev.cfg, sn))
+		xmlBody, encErr := catalog.BuildDeviceInfoBody(dev.cfg, sn)
 		if encErr != nil {
 			r.log.Error("encode DeviceInfo", "err", encErr)
 			return
@@ -107,7 +98,7 @@ func (r *Runtime) onMessage(req *sip.Request, tx sip.ServerTransaction) {
 		respond(tx, req, 200, "OK", nil)
 		return
 	default:
-		r.log.Info("ignore MANSCDP", "cmd", cmd, "deviceId", dev.cfg.DeviceID)
+		r.log.Info("ignore MANSCDP", "cmd", cmd, "sn", sn, "deviceId", dev.cfg.DeviceID)
 		respond(tx, req, 200, "OK", nil)
 		return
 	}

@@ -87,7 +87,8 @@ SIGINT / SIGTERM 会注销设备并清理会话。
 - `devices[].sip`：上级 `host/port/serverId/domain`、密码、`transport: udp|tcp`
 - **REGISTER Request-URI** = `sip:{serverId}@{domain}`（LiveGBS / 常见国标上级）；**From/To** = `sip:{deviceId}@{domain}`。勿把设备 ID 放进 Request-URI，否则易被回 **400 Bad Request**
 - `registerId` 已忽略（保留字段仅为兼容旧 YAML）
-- `devices[].channels[]`：`channelId` + `flvUrl` + `name`
+- `devices[].name`：DeviceInfo 显示名（空→`deviceId`）
+- `devices[].channels[]`：`channelId` + `flvUrl` + `name`（Catalog Item 显示名；空→`channelId`）
 
 ## 联调注意（REGISTER 400）
 
@@ -101,13 +102,28 @@ SIGINT / SIGTERM 会注销设备并清理会话。
 
 sipgo UDP 发送上限约 **1300 字节**（`UDPMTUSize-200`）。把整份 Catalog XML 塞进查询的 **200 body** 会触发 `size of packet larger than MTU`。
 
-当前行为：查询 MESSAGE → **空 200 OK** → 设备侧再发 **Request MESSAGE** 上报 Response；通道多时按 body≤800B 分页，每页同 `SN`/`SumNum`，`DeviceList Num` 为本页条数。日志应见 `Catalog MESSAGE sent page=…`，不应再出现 `MESSAGE 200 failed`。
+当前行为：查询 MESSAGE → **空 200 OK** → 设备侧再发 **Request MESSAGE**（`Content-Type: Application/MANSCDP+xml`，`To` = 平台 `serverId@domain`）上报 Response；通道多时按 body≤800B 分页，每页同 `SN`/`SumNum`，`DeviceList Num` 为本页条数。
+
+日志期望：
+- `inbound MESSAGE cmd=Catalog sn=<平台Query的SN> bodyLen=…`
+- `Catalog MESSAGE sent … sn=<同一SN>`（**不能**再是 `sn=0`）
+
+## 显示名称（Catalog / DeviceInfo）
+
+上级列表里的名称来自 YAML，写入 MANSCDP 时**不会留空**：
+
+| 配置 | XML | 用途 |
+|------|-----|------|
+| `devices[].name` | DeviceInfo `<DeviceName>` + `<Name>` | 设备显示名；空则回退 `deviceId` |
+| `channels[].name` | Catalog Item `<Name>` | 通道/镜头显示名；空则回退 `channelId` |
+
+Load 时 `applyDefaults` 也会把空 name 填成 id；Catalog/DeviceInfo 组装再兜一层。
 
 ## manscdp 说明
 
 直接依赖 `github.com/mickeyzzc/gb28181-go/manscdp`（v0.15.1）。该子包自带 GB2312/GBK 声明处理与 Catalog/Keepalive 等类型；本仓库 **不 vendor、不复制** 其源码。
 
-适配点：Catalog 的 `<Query>` 可走 `Decode`；**DeviceInfo / DeviceStatus 平台查询也是 `<Query>` 根**，但 manscdp 类型是 `<Response>` 根，`Decode` 会报错——用 `internal/catalog.ProbeMessage`（`manscdp.UTF8Body` + 最小头解析）取 SN/CmdType，再用 `Encode` 回包。若日后上游补齐 Query 类型，可删掉 probe。
+适配点：入站 MESSAGE **一律**用 `internal/catalog.ProbeMessage`（`UTF8Body` + 最小 XML 头）取 `CmdType`/`SN`，再组 Response。不要依赖 `manscdp.Decode` 的类型断言——它返回的是**值类型**（如 `CatalogQuery` 而非 `*CatalogQuery`），旧代码 `switch` 打到指针会静默得到 **SN=0**，LiveGBS 就会一直重查 Catalog。DeviceInfo/DeviceStatus 的平台查询也是 `<Query>` 根，Decode 对 Response 型结构本身也会失败，同样走 Probe。
 
 ## 已知缺口 / 下一步
 

@@ -2,6 +2,7 @@ package catalog
 
 import (
 	"encoding/xml"
+	"strings"
 
 	"github.com/mickeyzzc/gb28181-go/manscdp"
 	"github.com/mviruch/gb28181-relay/internal/config"
@@ -141,7 +142,7 @@ func channelItems(dev config.DeviceConfig) []catalogItem {
 	for _, ch := range dev.Channels {
 		items = append(items, catalogItem{
 			DeviceID:     ch.ChannelID,
-			Name:         ch.Name,
+			Name:         channelDisplayName(ch),
 			Manufacturer: "relay",
 			Model:        "FLV",
 			Owner:        "Owner",
@@ -158,6 +159,22 @@ func channelItems(dev config.DeviceConfig) []catalogItem {
 	return items
 }
 
+// channelDisplayName prefers channels[].name; never leaves Catalog Item Name empty.
+func channelDisplayName(ch config.ChannelConfig) string {
+	if n := strings.TrimSpace(ch.Name); n != "" {
+		return n
+	}
+	return ch.ChannelID
+}
+
+// deviceDisplayName prefers devices[].name; never leaves DeviceInfo DeviceName empty.
+func deviceDisplayName(dev config.DeviceConfig) string {
+	if n := strings.TrimSpace(dev.Name); n != "" {
+		return n
+	}
+	return dev.DeviceID
+}
+
 // BuildKeepalive builds a Keepalive Notify body.
 func BuildKeepalive(deviceID string, sn int) manscdp.Keepalive {
 	return manscdp.Keepalive{
@@ -168,19 +185,55 @@ func BuildKeepalive(deviceID string, sn int) manscdp.Keepalive {
 	}
 }
 
-// BuildDeviceInfo builds a minimal DeviceInfo response.
+// deviceInfoResponse is DeviceInfo Response XML (GB/T 28181 A.2.6.5).
+// DeviceName is the标准字段; Name is duplicated for platforms (e.g. LiveGBS UI)
+// that read either tag for the displayed device title.
+type deviceInfoResponse struct {
+	XMLName      xml.Name `xml:"Response"`
+	CmdType      string   `xml:"CmdType"`
+	SN           int      `xml:"SN"`
+	DeviceID     string   `xml:"DeviceID"`
+	DeviceName   string   `xml:"DeviceName"`
+	Name         string   `xml:"Name"`
+	Manufacturer string   `xml:"Manufacturer"`
+	Model        string   `xml:"Model"`
+	Firmware     string   `xml:"Firmware"`
+	Channel      int      `xml:"Channel"`
+	Result       string   `xml:"Result"`
+}
+
+// BuildDeviceInfo builds a DeviceInfo response with a non-empty display name.
 func BuildDeviceInfo(dev config.DeviceConfig, sn int) manscdp.DeviceInfo {
+	name := deviceDisplayName(dev)
 	return manscdp.DeviceInfo{
 		CmdType:      manscdp.CmdDeviceInfo,
 		SN:           sn,
 		DeviceID:     dev.DeviceID,
-		DeviceName:   dev.Name,
+		DeviceName:   name,
 		Manufacturer: "relay",
 		Model:        "FLV",
 		Firmware:     "0.1.0",
 		Channel:      len(dev.Channels),
 		Result:       "OK",
 	}
+}
+
+// BuildDeviceInfoBody encodes DeviceInfo Response XML (DeviceName + Name).
+func BuildDeviceInfoBody(dev config.DeviceConfig, sn int) ([]byte, error) {
+	name := deviceDisplayName(dev)
+	resp := deviceInfoResponse{
+		CmdType:      string(manscdp.CmdDeviceInfo),
+		SN:           sn,
+		DeviceID:     dev.DeviceID,
+		DeviceName:   name,
+		Name:         name,
+		Manufacturer: "relay",
+		Model:        "FLV",
+		Firmware:     "0.1.0",
+		Channel:      len(dev.Channels),
+		Result:       "OK",
+	}
+	return manscdp.Encode(resp)
 }
 
 // BuildDeviceStatus builds a minimal DeviceStatus response.
