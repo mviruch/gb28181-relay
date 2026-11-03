@@ -83,6 +83,7 @@ SIGINT / SIGTERM 会注销设备并清理会话。
 见 `config.example.yaml`：
 
 - `listen.publicHost`：写入 Contact / 应答 SDP `c=`，须上级可达
+- 出站 Via 带 `;rport`（NAT）；Contact/SDP 仍用 `listen.publicHost`
 - `devices[].sip`：上级 `host/port/serverId/domain`、密码、`transport: udp|tcp`
 - `devices[].channels[]`：`channelId` + `flvUrl` + `name`
 

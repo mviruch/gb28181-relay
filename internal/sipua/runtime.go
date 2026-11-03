@@ -45,6 +45,7 @@ func NewRuntime(cfg *config.Config, log *slog.Logger) (*Runtime, error) {
 	client, err := sipgo.NewClient(ua,
 		sipgo.WithClientHostname(cfg.Listen.PublicHost),
 		sipgo.WithClientPort(cfg.Listen.Port),
+		sipgo.WithClientNAT(),
 	)
 	if err != nil {
 		_ = ua.Close()
