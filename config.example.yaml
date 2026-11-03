@@ -29,6 +29,7 @@ devices:
       expires: 3600
       keepalive: 60
     channels:
+      # channelId: unique within this device only; may repeat under other devices
       # channels[].name → Catalog 通道 Item <Name>（通道显示名，如 ch1-flv；勿填设备名）；空则用 channelId
       - channelId: "34020000001320000001"
         name: "ch1-flv"

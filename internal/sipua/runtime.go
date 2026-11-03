@@ -25,7 +25,6 @@ type Runtime struct {
 	server  *sipgo.Server
 	dialog  *sipgo.DialogServerCache
 	devices map[string]*DeviceUA // deviceId -> ua
-	byChan  map[string]*DeviceUA // channelId -> ua
 	mu      sync.RWMutex
 }
 
@@ -69,14 +68,10 @@ func NewRuntime(cfg *config.Config, log *slog.Logger) (*Runtime, error) {
 		server:  server,
 		dialog:  sipgo.NewDialogServerCache(client, contact),
 		devices: make(map[string]*DeviceUA),
-		byChan:  make(map[string]*DeviceUA),
 	}
 	for _, dcfg := range cfg.Devices {
 		d := newDeviceUA(dcfg, cfg.Listen.PublicHost, cfg.Listen.Port, client, log)
 		r.devices[dcfg.DeviceID] = d
-		for _, ch := range dcfg.Channels {
-			r.byChan[ch.ChannelID] = d
-		}
 	}
 	r.server.OnMessage(r.onMessage)
 	r.server.OnInvite(r.onInvite)
@@ -121,25 +116,63 @@ func (r *Runtime) Close() error {
 	return nil
 }
 
+// lookupByRequestURI resolves the DeviceUA for an inbound MESSAGE/INVITE.
+//
+// Prefer deviceId (Request-URI user, then To user). channelId may repeat across
+// devices, so there is no global channel→device map: a channel-only URI is
+// accepted only when exactly one configured device owns that channelId.
+// Ambiguous channelIds (shared by ≥2 devices) yield no match — never a silent
+// wrong-device bind. Platforms should INVITE/MESSAGE sip:{deviceId}@… (or put
+// the deviceId in To); channel-only Request-URI is best-effort when unique.
 func (r *Runtime) lookupByRequestURI(req *sip.Request) (*DeviceUA, string) {
 	user := req.Recipient.User
 	r.mu.RLock()
 	defer r.mu.RUnlock()
+
 	if d, ok := r.devices[user]; ok {
-		return d, user
-	}
-	if d, ok := r.byChan[user]; ok {
 		return d, user
 	}
 	if to := req.To(); to != nil {
 		if d, ok := r.devices[to.Address.User]; ok {
 			return d, to.Address.User
 		}
-		if d, ok := r.byChan[to.Address.User]; ok {
+	}
+
+	if d, ok := r.findUniqueDeviceByChannel(user); ok {
+		return d, user
+	}
+	if to := req.To(); to != nil && to.Address.User != user {
+		if d, ok := r.findUniqueDeviceByChannel(to.Address.User); ok {
 			return d, to.Address.User
 		}
 	}
 	return nil, user
+}
+
+// findUniqueDeviceByChannel returns the single device that owns channelID.
+// Caller must hold r.mu (at least RLock). Zero or multiple owners → false.
+func (r *Runtime) findUniqueDeviceByChannel(channelID string) (*DeviceUA, bool) {
+	if channelID == "" {
+		return nil, false
+	}
+	var match *DeviceUA
+	for _, d := range r.devices {
+		if _, ok := r.findChannel(d, channelID); ok {
+			if match != nil {
+				r.log.Warn("ambiguous channelId across devices; refusing silent bind",
+					"channelId", channelID,
+					"deviceA", match.cfg.DeviceID,
+					"deviceB", d.cfg.DeviceID,
+				)
+				return nil, false
+			}
+			match = d
+		}
+	}
+	if match == nil {
+		return nil, false
+	}
+	return match, true
 }
 
 func (r *Runtime) findChannel(dev *DeviceUA, channelID string) (config.ChannelConfig, bool) {
@@ -165,10 +198,8 @@ func respond(tx sip.ServerTransaction, req *sip.Request, code int, reason string
 	}
 }
 
-
 func headerParams(k, v string) sip.HeaderParams {
 	p := sip.NewParams()
 	p.Add(k, v)
 	return p
 }
-

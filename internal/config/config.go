@@ -133,7 +133,6 @@ func (c *Config) validate() error {
 		return fmt.Errorf("devices[] must not be empty")
 	}
 	seenDev := map[string]struct{}{}
-	seenCh := map[string]struct{}{}
 	for i, d := range c.Devices {
 		if d.DeviceID == "" {
 			return fmt.Errorf("devices[%d].deviceId is required", i)
@@ -157,6 +156,9 @@ func (c *Config) validate() error {
 		if len(d.Channels) == 0 {
 			return fmt.Errorf("devices[%d].channels must not be empty", i)
 		}
+		// channelId uniqueness is per-device only; the same channelId may appear
+		// under different devices (SIP routing prefers deviceId, see sipua.lookupByRequestURI).
+		seenCh := map[string]struct{}{}
 		for j, ch := range d.Channels {
 			if ch.ChannelID == "" {
 				return fmt.Errorf("devices[%d].channels[%d].channelId is required", i, j)
@@ -165,7 +167,7 @@ func (c *Config) validate() error {
 				return fmt.Errorf("devices[%d].channels[%d].flvUrl is required", i, j)
 			}
 			if _, ok := seenCh[ch.ChannelID]; ok {
-				return fmt.Errorf("duplicate channelId %q", ch.ChannelID)
+				return fmt.Errorf("devices[%d]: duplicate channelId %q", i, ch.ChannelID)
 			}
 			seenCh[ch.ChannelID] = struct{}{}
 		}

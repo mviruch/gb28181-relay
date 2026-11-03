@@ -89,6 +89,7 @@ SIGINT / SIGTERM 会注销设备并清理会话。
 - `registerId` 已忽略（保留字段仅为兼容旧 YAML）
 - `devices[].name`：DeviceInfo 显示名（空→`deviceId`）
 - `devices[].channels[]`：`channelId` + `flvUrl` + `name`（Catalog Item 显示名；空→`channelId`）
+- **channelId 作用域**：仅在**同一 device 内**唯一；**允许**不同设备复用相同 `channelId`。`deviceId` 仍全局唯一。SIP 解析优先 `deviceId`（Request-URI / To）；若 URI user 仅为 channelId 且多设备共享该 id，则**不匹配**（打 warn），避免静默绑到错误设备——平台应尽量用 `sip:{deviceId}@…` 点播
 
 ## 联调注意（REGISTER 400）
 
